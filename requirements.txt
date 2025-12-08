@@ -1,0 +1,11 @@
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.6.0
+python-multipart
+transformers==4.41.2
+git+https://github.com/coqui-ai/TTS.git
+torch>=2.1.0 --extra-index-url https://download.pytorch.org/whl/cu118
+torchcodec>=0.0.2
+torchaudio>=2.1.0 --extra-index-url https://download.pytorch.org/whl/cu118
+soundfile
+requests
