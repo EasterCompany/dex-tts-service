@@ -1,14 +1,20 @@
 import os
 import io
 import logging
-import sys # Import sys
+import sys
 import time
 import psutil
+import subprocess
 from fastapi import FastAPI, HTTPException, Body
 from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel
 import torch
-import contextlib # Import contextlib
+import contextlib
+import redis
+import hashlib
+import numpy as np
+import scipy.io.wavfile
+import re
 
 # Force standard streams to be unbuffered
 sys.stdout.reconfigure(line_buffering=True)
@@ -25,8 +31,6 @@ logger = logging.getLogger("dex-tts-service")
 START_TIME = time.time()
 
 # Fix for PyTorch 2.6+ weights_only=True security change
-# The "Nuclear Option": Monkey-patch torch.load to disable weights_only check
-# during model initialization. We trust the source (Coqui official models).
 @contextlib.contextmanager
 def unsafe_torch_load():
     original_load = torch.load
@@ -43,6 +47,18 @@ def unsafe_torch_load():
 
 # Global model variable
 tts_model = None
+
+# Redis Client
+redis_client = None
+try:
+    redis_client = redis.Redis(host='localhost', port=6379, db=0)
+    # Test connection
+    redis_client.ping()
+    logger.info("Connected to Redis successfully.")
+except Exception as e:
+    logger.warning(f"Failed to connect to Redis: {e}")
+    redis_client = None
+
 # Dynamically select the best CUDA device, preferring 4060
 if torch.cuda.is_available():
     best_device_index = 0
@@ -52,13 +68,11 @@ if torch.cuda.is_available():
         props = torch.cuda.get_device_properties(i)
         logger.info(f"Found GPU {i}: {props.name} (CUDA Capability: {props.major}.{props.minor})")
         
-        # Prioritize 4060 if found
         if "4060" in props.name:
             best_device_index = i
             found_4060 = True
             break
         
-        # Fallback to highest capability if 4060 not explicitly named yet
         current_capability = float(f"{props.major}.{props.minor}")
         if current_capability > best_capability:
             best_capability = current_capability
@@ -84,7 +98,6 @@ async def lifespan(app: FastAPI):
         from TTS.api import TTS
         logger.info("Loading XTTS-v2 model (with weights_only=False override)...")
         
-        # Use the context manager to allow unsafe globals during loading
         with unsafe_torch_load():
             tts_model = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to(DEVICE)
             
@@ -93,10 +106,9 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to load TTS model: {e}")
         tts_model = None
     yield
-    # Cleanup / shutdown code if any
     logger.info("TTS Service shutdown complete.")
 
-app = FastAPI(title="Dexter TTS Service", version="1.0.0", lifespan=lifespan) # Pass lifespan to FastAPI
+app = FastAPI(title="Dexter TTS Service", version="1.0.0", lifespan=lifespan)
 
 class GenerateRequest(BaseModel):
     text: str
@@ -112,33 +124,16 @@ async def health_check():
         )
     return {"status": "ok", "device": DEVICE, "model": "xtts_v2"}
 
-import os
-import io
-import logging
-import sys # Import sys
-import time
-import psutil
-import subprocess # Import subprocess
-from fastapi import FastAPI, HTTPException, Body
-from fastapi.responses import Response, JSONResponse
-from pydantic import BaseModel
-import torch
-import contextlib # Import contextlib
-
-# ... (keep existing code until service_status) ...
-
 @app.get("/service")
 async def service_status():
     process = psutil.Process(os.getpid())
     uptime_seconds = time.time() - START_TIME
     
-    # Format uptime string
     m, s = divmod(uptime_seconds, 60)
     h, m = divmod(m, 60)
     d, h = divmod(h, 24)
     uptime_str = f"{int(d)}d {int(h)}h {int(m)}m {int(s)}s" if d > 0 else f"{int(h)}h {int(m)}m {int(s)}s"
 
-    # Get git info
     branch = "unknown"
     commit = "unknown"
     try:
@@ -153,6 +148,15 @@ async def service_status():
         try:
             with open("version.txt", "r") as f:
                 version_str = f.read().strip()
+        except:
+            pass
+    else:
+        # Try to get from git tags
+        try:
+            version_str = subprocess.check_output(["git", "describe", "--tags", "--abbrev=0"]).decode().strip()
+            # Remove 'v' prefix if present
+            if version_str.startswith("v"):
+                version_str = version_str[1:]
         except:
             pass
 
@@ -171,7 +175,7 @@ async def service_status():
         },
         "metrics": {
             "cpu": { "avg": process.cpu_percent(interval=0.1) },
-            "memory": { "avg": process.memory_info().rss / 1024 / 1024 } # MB
+            "memory": { "avg": process.memory_info().rss / 1024 / 1024 }
         }
     }
 
@@ -184,40 +188,72 @@ async def generate_audio(request: GenerateRequest):
     if not request.text:
         raise HTTPException(status_code=400, detail="Text is required.")
 
-    # Validate speaker wav
     speaker_wav = request.speaker_wav
     if not os.path.exists(speaker_wav):
-        # If default is missing, we can't clone
         if speaker_wav == DEFAULT_SPEAKER_PATH:
              raise HTTPException(status_code=500, detail=f"Default reference voice not found at {DEFAULT_SPEAKER_PATH}. Please add a reference.wav file.")
-        
-        # If custom path is missing, fallback or error
         raise HTTPException(status_code=400, detail=f"Speaker wav file not found: {speaker_wav}")
 
     try:
         logger.info(f"Generating audio for: '{request.text[:30]}...' ")
         
-        # Generate to a temporary buffer/file
-        # TTS API usually writes to file. We'll write to a unique temp file.
-        import uuid
-        filename = f"{uuid.uuid4()}.wav"
-        output_path = os.path.join(OUTPUT_DIR, filename)
-
-        tts_model.tts_to_file(
-            text=request.text,
-            file_path=output_path,
-            speaker_wav=speaker_wav,
-            language=request.language
-        )
-
-        # Read file back into memory
-        with open(output_path, "rb") as f:
-            audio_data = f.read()
+        # 2. Split text into sentences for granular caching
+        # Simple regex split on punctuation
+        sentences = re.split(r'(?<=[.!?]) +', request.text)
         
-        # Cleanup
-        os.remove(output_path)
+        final_wav_parts = []
+        speaker_hash = hashlib.md5(request.speaker_wav.encode()).hexdigest()
+        
+        for sent in sentences:
+            sent = sent.strip()
+            if not sent: continue
+            
+            # Cache key structure: tts:v1:speaker_hash:lang:md5(text)
+            text_hash = hashlib.md5(sent.encode()).hexdigest()
+            key = f"tts:v1:{speaker_hash}:{request.language}:{text_hash}"
+            
+            audio_chunk = None
+            if redis_client:
+                try:
+                    cached = redis_client.get(key)
+                    if cached:
+                        # logger.info(f"Cache hit for: {sent[:20]}")
+                        audio_chunk = np.frombuffer(cached, dtype=np.float32)
+                except Exception as e:
+                    logger.warning(f"Redis get failed: {e}")
+            
+            if audio_chunk is None:
+                # logger.info(f"Cache miss for: {sent[:20]}")
+                # Generate audio (returns list of floats)
+                # Note: We pass speaker_wav each time. Latent extraction optimization 
+                # was causing issues with the high-level API wrapper.
+                out = tts_model.tts(
+                    text=sent,
+                    language=request.language,
+                    speaker_wav=request.speaker_wav
+                )
+                audio_chunk = np.array(out, dtype=np.float32)
+                
+                # Cache the result
+                if redis_client:
+                    try:
+                        redis_client.set(key, audio_chunk.tobytes())
+                    except Exception as e:
+                        logger.warning(f"Redis set failed: {e}")
+            
+            final_wav_parts.append(audio_chunk)
+            
+        if not final_wav_parts:
+             raise HTTPException(status_code=400, detail="No audio generated from text.")
 
-        return Response(content=audio_data, media_type="audio/wav")
+        full_audio = np.concatenate(final_wav_parts)
+
+        # Convert to WAV in memory
+        buffer = io.BytesIO()
+        # XTTS v2 is 24000Hz
+        scipy.io.wavfile.write(buffer, 24000, full_audio)
+
+        return Response(content=buffer.getvalue(), media_type="audio/wav")
 
     except Exception as e:
         logger.error(f"Generation failed: {e}")
@@ -225,6 +261,4 @@ async def generate_audio(request: GenerateRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    # Add log_config=None to allow our logging setup to take precedence,
-    # or rely on uvicorn's default behavior which should also go to stderr/stdout.
     uvicorn.run(app, host="127.0.0.1", port=8200)
