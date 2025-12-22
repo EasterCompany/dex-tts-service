@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -65,10 +66,23 @@ func main() {
 
 	if _, err := os.Stat(venvPython); os.IsNotExist(err) {
 		log.Println("Creating virtual environment...")
-		// Try python3 first, then python
+		// Try compatible Python versions first
 		pythonCmd := "python3"
-		if _, err := exec.LookPath("python3"); err != nil {
-			pythonCmd = "python"
+		compatibleVersions := []string{"python3.10", "python3.11", "python3"}
+		for _, v := range compatibleVersions {
+			if _, err := exec.LookPath(v); err == nil {
+				pythonCmd = v
+				// Check version if it's just "python3"
+				if v == "python3" {
+					out, _ := exec.Command(v, "--version").Output()
+					if strings.Contains(string(out), "3.13") || strings.Contains(string(out), "3.12") {
+						log.Printf("Skipping %s as it is too new for TTS library", v)
+						continue
+					}
+				}
+				log.Printf("Using %s to create virtual environment", v)
+				break
+			}
 		}
 
 		cmd := exec.Command(pythonCmd, "-m", "venv", venvDir)
