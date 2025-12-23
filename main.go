@@ -21,7 +21,7 @@ import (
 var embeddedFiles embed.FS
 
 const (
-	InternalPort = "8200"
+	InternalPort = "8202"
 	PublicPort   = "8200"
 	ServiceName  = "dex-tts-service"
 )
