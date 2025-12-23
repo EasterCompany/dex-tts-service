@@ -89,9 +89,7 @@ DEFAULT_SPEAKER_PATH = os.path.join(os.path.dirname(__file__), "assets", "refere
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Define lifespan event handler
-@contextlib.asynccontextmanager
-async def lifespan(app: FastAPI):
+def load_model():
     global tts_model
     logger.info(f"Starting TTS Service on device: {DEVICE}")
     try:
@@ -107,14 +105,7 @@ async def lifespan(app: FastAPI):
         if os.path.exists(config_path):
             logger.info(f"Found local model configuration at {config_path}. Loading directly...")
             with unsafe_torch_load():
-                # When loading locally, we assume the directory contains the necessary files.
-                # TTS() can accept model_path and config_path.
-                # For XTTS, we might need to be specific or just pass the config.
-                # However, the high-level API usually takes model_name or model_path.
-                # If model_path is a directory, it might work if it detects checkpoints.
-                # Let's try passing the directory as model_path (or we might need to find the .pth file).
-                # But TTS(model_path=...) constructor argument is 'model_path'.
-                # Let's search for a .pth file in the directory to be safe.
+                # Search for a .pth file in the directory to be safe.
                 model_file = None
                 for f in os.listdir(custom_model_path):
                     if f.endswith(".pth") and "model" in f: # Heuristic for model.pth
@@ -124,9 +115,6 @@ async def lifespan(app: FastAPI):
                 if model_file:
                      tts_model = TTS(model_path=custom_model_path, config_path=config_path).to(DEVICE)
                 else:
-                     # Fallback if no .pth found, though config exists. 
-                     # Maybe the user renamed it or it's just config.
-                     # Try loading with just config? Or fallback to manager.
                      logger.warning("config.json found but no obvious .pth model file. Attempting load with directory...")
                      tts_model = TTS(model_path=custom_model_path, config_path=config_path).to(DEVICE)
 
@@ -139,6 +127,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to load TTS model: {e}")
         tts_model = None
+
+# Define lifespan event handler
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Load model synchronously during startup
+    load_model()
     yield
     logger.info("TTS Service shutdown complete.")
 
