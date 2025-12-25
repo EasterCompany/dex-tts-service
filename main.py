@@ -59,30 +59,17 @@ except Exception as e:
     logger.warning(f"Failed to connect to Redis: {e}")
     redis_client = None
 
-# Dynamically select the best CUDA device, preferring 4060
-if torch.cuda.is_available():
-    best_device_index = 0
-    best_capability = -1.0
-    found_4060 = False
-    for i in range(torch.cuda.device_count()):
-        props = torch.cuda.get_device_properties(i)
-        logger.info(f"Found GPU {i}: {props.name} (CUDA Capability: {props.major}.{props.minor})")
-        
-        if "4060" in props.name:
-            best_device_index = i
-            found_4060 = True
-            break
-        
-        current_capability = float(f"{props.major}.{props.minor}")
-        if current_capability > best_capability:
-            best_capability = current_capability
-            best_device_index = i
-            
-    DEVICE = f"cuda:{best_device_index}"
-    logger.info(f"Selected device: {DEVICE} ({torch.cuda.get_device_name(best_device_index)})")
-else:
-    DEVICE = "cpu"
-    logger.info("CUDA not available. Using CPU.")
+# Force CPU usage to save VRAM for LLMs
+DEVICE = "cpu"
+logger.info("Forcing CPU usage for TTS service to conserve VRAM.")
+
+# Original CUDA detection logic disabled
+# if torch.cuda.is_available():
+#     best_device_index = 0
+# ...
+# else:
+#     DEVICE = "cpu"
+#     logger.info("CUDA not available. Using CPU.")
 
 # Constants
 DEFAULT_SPEAKER_PATH = os.path.join(os.path.dirname(__file__), "assets", "reference.wav")

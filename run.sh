@@ -26,5 +26,11 @@ fi
 # Set environment variables for Coqui
 export COQUI_TOS_AGREED=1
 
+# Optimization for CPU-only mode: Limit threads to avoid starving Go services
+export OMP_NUM_THREADS=4
+export MKL_NUM_THREADS=4
+# Explicitly hide GPU as a secondary safeguard
+export CUDA_VISIBLE_DEVICES=""
+
 echo "Starting Dexter TTS Service on 127.0.0.1:8200..."
 python main.py
