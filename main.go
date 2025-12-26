@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 )
 
@@ -53,7 +52,8 @@ func main() {
 		log.Fatalf("Failed to get home directory: %v", err)
 	}
 	serviceDir := filepath.Join(homeDir, "Dexter", "services", ServiceName)
-	venvDir := filepath.Join(serviceDir, "venv")
+	// Point to the global Dexter Python 3.10 venv instead of a local one
+	venvDir := filepath.Join(homeDir, "Dexter", "python3.10")
 
 	// Ensure service directory exists
 	if err := os.MkdirAll(serviceDir, 0755); err != nil {
@@ -82,43 +82,17 @@ func main() {
 	}
 
 	if _, err := os.Stat(venvPython); os.IsNotExist(err) {
-		log.Println("Creating virtual environment...")
-		// Try compatible Python versions first
-		pythonCmd := "python3"
-		compatibleVersions := []string{"python3.10", "python3.11", "python3"}
-		for _, v := range compatibleVersions {
-			if _, err := exec.LookPath(v); err == nil {
-				pythonCmd = v
-				// Check version if it's just "python3"
-				if v == "python3" {
-					out, _ := exec.Command(v, "--version").Output()
-					if strings.Contains(string(out), "3.13") || strings.Contains(string(out), "3.12") {
-						log.Printf("Skipping %s as it is too new for TTS library", v)
-						continue
-					}
-				}
-				log.Printf("Using %s to create virtual environment", v)
-				break
-			}
-		}
-
-		cmd := exec.Command(pythonCmd, "-m", "venv", venvDir)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			log.Fatalf("Failed to create venv: %v. Ensure python3 is installed.", err)
-		}
+		log.Fatalf("Global Python 3.10 environment not found at %s. Please ensure dex-cli has initialized it.", venvDir)
 	}
 
 	// Install Dependencies
-	log.Println("Checking dependencies (this may take a while for large packages like torch)...")
-	// We force install/upgrade from requirements.txt to ensure consistency
+	log.Println("Checking dependencies in global Python 3.10 environment...")
+	// We install from requirements.txt to ensure the global venv has everything needed for this service
 	cmd := exec.Command(venvPip, "install", "-r", filepath.Join(serviceDir, "requirements.txt"))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		log.Printf("Warning: pip install failed: %v", err)
-		// We continue, as it might be a transient network issue or already installed
 	}
 
 	// 3. Start Python Service
