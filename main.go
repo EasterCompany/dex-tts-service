@@ -131,6 +131,11 @@ func main() {
 	env = append(env, "HOST=127.0.0.1")
 	// Important: Unbuffer output
 	env = append(env, "PYTHONUNBUFFERED=1")
+	// Inject Version Info
+	env = append(env, "DEX_VERSION="+version)
+	env = append(env, "DEX_BRANCH="+branch)
+	env = append(env, "DEX_COMMIT="+commit)
+	env = append(env, "DEX_BUILD_DATE="+buildDate)
 	pyCmd.Env = env
 
 	pyCmd.Stdout = os.Stdout

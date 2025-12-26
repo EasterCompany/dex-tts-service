@@ -151,31 +151,37 @@ async def service_status():
     d, h = divmod(h, 24)
     uptime_str = f"{int(d)}d {int(h)}h {int(m)}m {int(s)}s" if d > 0 else f"{int(h)}h {int(m)}m {int(s)}s"
 
-    branch = "unknown"
-    commit = "unknown"
-    try:
-        branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
-        commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
-    except:
-        pass
+    # 1. Try Environment Variables (Injected by Go Wrapper)
+    branch = os.getenv("DEX_BRANCH", "unknown")
+    commit = os.getenv("DEX_COMMIT", "unknown")
+    version_str = os.getenv("DEX_VERSION", "")
+    build_date = os.getenv("DEX_BUILD_DATE", "unknown")
 
-    # Get version
-    version_str = "0.0.1"
-    if os.path.exists("version.txt"):
+    # 2. Fallbacks
+    if branch == "unknown":
         try:
-            with open("version.txt", "r") as f:
-                version_str = f.read().strip()
-        except:
-            pass
-    else:
-        # Try to get from git tags
+            branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
+        except: pass
+
+    if commit == "unknown":
         try:
-            version_str = subprocess.check_output(["git", "describe", "--tags", "--abbrev=0"], stderr=subprocess.DEVNULL).decode().strip()
-            # Remove 'v' prefix if present
-            if version_str.startswith("v"):
-                version_str = version_str[1:]
-        except:
-            pass
+            commit = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
+        except: pass
+
+    if not version_str or version_str == "0.0.0":
+        version_str = "0.0.1" # Default fallback
+        if os.path.exists("version.txt"):
+            try:
+                with open("version.txt", "r") as f:
+                    version_str = f.read().strip()
+            except: pass
+        else:
+            try:
+                # Try to get from git tags
+                v_tag = subprocess.check_output(["git", "describe", "--tags", "--abbrev=0"], stderr=subprocess.DEVNULL).decode().strip()
+                if v_tag.startswith("v"):
+                    version_str = v_tag[1:]
+            except: pass
 
     version_parts = version_str.split('.')
     major = version_parts[0] if len(version_parts) > 0 else "0"
@@ -194,7 +200,7 @@ async def service_status():
                 "patch": patch,
                 "branch": branch,
                 "commit": commit,
-                "build_date": "unknown",
+                "build_date": build_date,
                 "arch": arch,
                 "build_hash": "unknown"
             }
