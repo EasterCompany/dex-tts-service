@@ -20,16 +20,27 @@ import (
 //go:embed main.py requirements.txt assets/*
 var embeddedFiles embed.FS
 
+var (
+	version   = "0.0.0"
+	branch    = "unknown"
+	commit    = "unknown"
+	buildDate = "unknown"
+)
+
 const (
 	InternalPort = "8202"
 	PublicPort   = "8200"
 	ServiceName  = "dex-tts-service"
-	Version      = "0.0.17"
 )
 
 func main() {
+	// Silence unused variable warnings by referencing them
+	_ = branch
+	_ = commit
+	_ = buildDate
+
 	if len(os.Args) > 1 && os.Args[1] == "version" {
-		fmt.Println(Version)
+		fmt.Println(version)
 		return
 	}
 
