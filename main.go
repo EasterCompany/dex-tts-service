@@ -335,14 +335,19 @@ if __name__ == "__main__":
     uvicorn.run(app, host=host, port=port, log_config=log_config)
 `
 
+var version = "0.0.0"
+
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "version" {
-		// Use environment variables injected during build, or default to 0.0.0
-		version := os.Getenv("DEX_BUILD_VERSION")
-		if version == "" {
-			version = "0.0.0"
+		// Priority: ldflags > environment variable > default
+		v := version
+		if v == "0.0.0" || v == "" {
+			v = os.Getenv("DEX_BUILD_VERSION")
 		}
-		fmt.Println(version)
+		if v == "" {
+			v = "0.0.0"
+		}
+		fmt.Println(v)
 		return
 	}
 
