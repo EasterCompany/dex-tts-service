@@ -398,7 +398,14 @@ func main() {
 	// Pass environment variables to Python process
 	pythonCmd := exec.Command(filepath.Join(venvDir, "bin", "python"), "main.py")
 	pythonCmd.Dir = serviceDir
-	pythonCmd.Env = os.Environ() // Inherit environment (including DEX_VERSION injected by dex-cli)
+
+	// Inherit environment and add/override DEX_VERSION
+	v := version
+	if v == "0.0.0" || v == "" {
+		v = os.Getenv("DEX_VERSION")
+	}
+
+	pythonCmd.Env = append(os.Environ(), fmt.Sprintf("DEX_VERSION=%s", v))
 	pythonCmd.Stdout = os.Stdout
 	pythonCmd.Stderr = os.Stderr
 
