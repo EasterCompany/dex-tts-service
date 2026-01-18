@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -89,9 +90,9 @@ except Exception as e:
     logger.warning(f"Failed to connect to Redis: {e}")
     redis_client = None
 
-# Force CPU usage to save VRAM for LLMs
-DEVICE = "cpu"
-logger.info("Forcing CPU usage for TTS service to conserve VRAM.")
+# Device Configuration
+DEVICE = os.getenv("DEX_TTS_DEVICE", "cpu")
+logger.info(f"TTS Service configured to use device: {DEVICE}")
 
 # Constants
 DEFAULT_SPEAKER_PATH = os.path.join(os.path.dirname(__file__), "assets", "reference.wav")
@@ -384,6 +385,22 @@ func main() {
 	// Create assets dir
 	_ = os.MkdirAll(filepath.Join(serviceDir, "assets"), 0755)
 
+	// Load options.json to get configuration
+	device := "cpu" // Default
+	optionsPath := filepath.Join(homeDir, "Dexter", "config", "options.json")
+	if data, err := os.ReadFile(optionsPath); err == nil {
+		var opts struct {
+			Services map[string]map[string]interface{} `json:"services"`
+		}
+		if err := json.Unmarshal(data, &opts); err == nil {
+			if svc, ok := opts.Services["tts"]; ok {
+				if val, ok := svc["device"].(string); ok {
+					device = val
+				}
+			}
+		}
+	}
+
 	// Use shared Dexter Python 3.10 environment
 	pythonEnvDir := filepath.Join(homeDir, "Dexter", "python3.10")
 	pythonBin := filepath.Join(pythonEnvDir, "bin", "python")
@@ -432,6 +449,7 @@ func main() {
 		fmt.Sprintf("DEX_BUILD_YEAR=%s", buildYear),
 		fmt.Sprintf("DEX_ARCH=%s", arch),
 		fmt.Sprintf("DEX_BUILD_HASH=%s", buildHash),
+		fmt.Sprintf("DEX_TTS_DEVICE=%s", device),
 	)
 
 	pythonCmd.Stdout = os.Stdout
