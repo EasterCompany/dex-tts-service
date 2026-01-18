@@ -411,6 +411,10 @@ func main() {
 		log.Fatalf("Shared Python 3.10 environment not found at %s. Run 'dex verify' or 'dex build' to fix.", pythonBin)
 	}
 
+	log.Println("Ensuring pip is up-to-date...")
+	pipUpdateCmd := exec.Command(pipBin, "install", "--upgrade", "pip")
+	_ = pipUpdateCmd.Run()
+
 	log.Println("Installing dependencies into shared environment...")
 	pipCmd := exec.Command(pipBin, "install", "-r", "requirements.txt")
 	pipCmd.Dir = serviceDir
