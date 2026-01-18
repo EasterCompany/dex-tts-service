@@ -384,30 +384,28 @@ func main() {
 	// Create assets dir
 	_ = os.MkdirAll(filepath.Join(serviceDir, "assets"), 0755)
 
-	venvDir := filepath.Join(serviceDir, "venv")
-	if _, err := os.Stat(venvDir); os.IsNotExist(err) {
-		log.Println("Creating virtual environment...")
-		cmd := exec.Command("python3.10", "-m", "venv", venvDir)
-		cmd.Dir = serviceDir
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			log.Fatalf("Failed to create venv: %v", err)
-		}
+	// Use shared Dexter Python 3.10 environment
+	pythonEnvDir := filepath.Join(homeDir, "Dexter", "python3.10")
+	pythonBin := filepath.Join(pythonEnvDir, "bin", "python")
+	pipBin := filepath.Join(pythonEnvDir, "bin", "pip")
 
-		log.Println("Installing dependencies...")
-		pipCmd := exec.Command(filepath.Join(venvDir, "bin", "pip"), "install", "-r", "requirements.txt")
-		pipCmd.Dir = serviceDir
-		pipCmd.Stdout = os.Stdout
-		pipCmd.Stderr = os.Stderr
-		if err := pipCmd.Run(); err != nil {
-			log.Fatalf("Failed to install dependencies: %v", err)
-		}
+	// Ensure the shared environment exists
+	if _, err := os.Stat(pythonBin); os.IsNotExist(err) {
+		log.Fatalf("Shared Python 3.10 environment not found at %s. Run 'dex verify' or 'dex build' to fix.", pythonBin)
+	}
+
+	log.Println("Installing dependencies into shared environment...")
+	pipCmd := exec.Command(pipBin, "install", "-r", "requirements.txt")
+	pipCmd.Dir = serviceDir
+	pipCmd.Stdout = os.Stdout
+	pipCmd.Stderr = os.Stderr
+	if err := pipCmd.Run(); err != nil {
+		log.Printf("Warning: Failed to install dependencies: %v", err)
 	}
 
 	log.Println("Starting Dexter TTS Service...")
 
-	pythonCmd := exec.Command(filepath.Join(venvDir, "bin", "python"), "main.py")
+	pythonCmd := exec.Command(pythonBin, "main.py")
 	pythonCmd.Dir = serviceDir
 
 	// Inherit environment and add/override DEX variables
